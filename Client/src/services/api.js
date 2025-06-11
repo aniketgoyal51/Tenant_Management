@@ -2,21 +2,28 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-// Function to check server availability
-const checkServerHealth = async () => {
-    try {
-        const response = await axios.get(`${API_URL}/health`, {
-            timeout: 5000,
-            headers: {
-                'Accept': 'application/json',
-            },
-            withCredentials: true
-        });
-        return response.status === 200;
-    } catch (error) {
-        console.error('Server health check failed:', error);
-        return false;
+// Function to check server availability with retries
+const checkServerHealth = async (retries = 2) => {
+    for (let i = 0; i <= retries; i++) {
+        try {
+            const response = await axios.get(`${API_URL}/health`, {
+                timeout: 10000, // Increased timeout to 10 seconds
+                headers: {
+                    'Accept': 'application/json',
+                },
+                withCredentials: true
+            });
+            return response.status === 200;
+        } catch (error) {
+            console.error(`Health check attempt ${i + 1} failed:`, error);
+            if (i === retries) {
+                return false;
+            }
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     }
+    return false;
 };
 
 // Create axios instance with retry logic
@@ -27,7 +34,7 @@ const api = axios.create({
         'Accept': 'application/json',
     },
     withCredentials: true,
-    timeout: 30000 // 30 seconds
+    timeout: 30000 // 30 seconds for regular requests
 });
 
 // Retry configuration
@@ -42,10 +49,12 @@ api.interceptors.request.use(
             config.params = { ...config.params, _t: Date.now() };
         }
 
-        // Check server health before making the request
-        const isServerHealthy = await checkServerHealth();
-        if (!isServerHealthy) {
-            throw new Error('Server is not responding. Please try again later.');
+        // Only check server health for non-health-check requests
+        if (!config.url.includes('/health')) {
+            const isServerHealthy = await checkServerHealth();
+            if (!isServerHealthy) {
+                throw new Error('Server is not responding. Please try again later.');
+            }
         }
 
         return config;
