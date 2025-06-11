@@ -1,7 +1,24 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_URL';
 
+// Function to check server availability
+const checkServerHealth = async () => {
+    try {
+        const response = await axios.get(`${API_URL}/health`, {
+            timeout: 5000,
+            headers: {
+                'Accept': 'application/json',
+            }
+        });
+        return response.status === 200;
+    } catch (error) {
+        console.error('Server health check failed:', error);
+        return false;
+    }
+};
+
+// Create axios instance with retry logic
 const api = axios.create({
     baseURL: API_URL,
     headers: {
@@ -12,15 +29,24 @@ const api = axios.create({
     timeout: 30000 // 30 seconds
 });
 
+// Retry configuration
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000; // 1 second
+
 // Add request interceptor
 api.interceptors.request.use(
-    config => {
+    async config => {
         // Add timestamp to prevent caching
         if (config.method === 'get') {
             config.params = { ...config.params, _t: Date.now() };
         }
-        // Ensure CORS headers are set
-        config.headers['Access-Control-Allow-Origin'] = '*';
+
+        // Check server health before making the request
+        const isServerHealthy = await checkServerHealth();
+        if (!isServerHealthy) {
+            throw new Error('Server is not responding. Please try again later.');
+        }
+
         return config;
     },
     error => {
@@ -29,10 +55,29 @@ api.interceptors.request.use(
     }
 );
 
-// Add response interceptor for better error handling
+// Add response interceptor with retry logic
 api.interceptors.response.use(
     response => response,
-    error => {
+    async error => {
+        const config = error.config;
+
+        // If we haven't retried yet and it's a network error or timeout
+        if (!config._retry && (error.code === 'ECONNABORTED' || !error.response)) {
+            config._retry = true;
+            config._retryCount = config._retryCount || 0;
+
+            if (config._retryCount < MAX_RETRIES) {
+                config._retryCount++;
+                console.log(`Retrying request (${config._retryCount}/${MAX_RETRIES})...`);
+
+                // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+
+                // Retry the request
+                return api(config);
+            }
+        }
+
         if (error.code === 'ECONNABORTED') {
             console.error('Request timeout - the server took too long to respond');
             return Promise.reject(new Error('The server is taking too long to respond. Please try again later.'));
@@ -53,7 +98,7 @@ api.interceptors.response.use(
         } else if (error.request) {
             // The request was made but no response was received
             console.error('No response received:', error.request);
-            return Promise.reject(new Error('Unable to reach the server. Please check your internet connection.'));
+            return Promise.reject(new Error('Unable to reach the server. Please check your internet connection and try again.'));
         } else {
             // Something happened in setting up the request that triggered an Error
             console.error('Error message:', error.message);
