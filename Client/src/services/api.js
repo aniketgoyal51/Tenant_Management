@@ -9,7 +9,8 @@ const checkServerHealth = async () => {
             timeout: 5000,
             headers: {
                 'Accept': 'application/json',
-            }
+            },
+            withCredentials: true
         });
         return response.status === 200;
     } catch (error) {
