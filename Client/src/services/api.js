@@ -9,7 +9,7 @@ const api = axios.create({
         'Accept': 'application/json',
     },
     withCredentials: true,
-    timeout: 30000 // Increased to 30 seconds
+    timeout: 30000 // 30 seconds
 });
 
 // Add request interceptor
@@ -19,6 +19,8 @@ api.interceptors.request.use(
         if (config.method === 'get') {
             config.params = { ...config.params, _t: Date.now() };
         }
+        // Ensure CORS headers are set
+        config.headers['Access-Control-Allow-Origin'] = '*';
         return config;
     },
     error => {
@@ -33,7 +35,6 @@ api.interceptors.response.use(
     error => {
         if (error.code === 'ECONNABORTED') {
             console.error('Request timeout - the server took too long to respond');
-            // You might want to show a user-friendly message here
             return Promise.reject(new Error('The server is taking too long to respond. Please try again later.'));
         }
 
@@ -44,6 +45,11 @@ api.interceptors.response.use(
             console.error('Error data:', error.response.data);
             console.error('Error status:', error.response.status);
             console.error('Error headers:', error.response.headers);
+
+            // Handle CORS errors specifically
+            if (error.response.status === 0) {
+                return Promise.reject(new Error('CORS error: Unable to access the API. Please check your connection.'));
+            }
         } else if (error.request) {
             // The request was made but no response was received
             console.error('No response received:', error.request);
